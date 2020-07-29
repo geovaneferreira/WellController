@@ -3,7 +3,8 @@ Controle de Bomba de Poço usando STM32F103
 
 Target:
 
-![alt text](https://www.curtocircuito.com.br/pub/media/wysiwyg/blog/STM32/stm32f103-pinout-diagram-1024x724_1.png)
+![alt text](https://github.com/geovaneferreira/WellController/blob/master/target.png?raw=true)
 
 Conexões:
 
+![alt text](https://raw.githubusercontent.com/geovaneferreira/WellController/master/IMG_0023.png)
