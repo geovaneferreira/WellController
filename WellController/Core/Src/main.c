@@ -6,7 +6,7 @@
   ******************************************************************************
   * @attention
   *
-  * <h2><center>&copy; Copyright (c) 2021 STMicroelectronics.
+  * <h2><center>&copy; Copyright (c) 2020 STMicroelectronics.
   * All rights reserved.</center></h2>
   *
   * This software component is licensed by ST under Ultimate Liberty license
@@ -24,12 +24,19 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "stdio.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-
+int _write(int file, char *ptr, int len)
+{
+  /* Implement your write code here, this is used by puts and printf for example */
+  int i=0;
+  for(i=0 ; i<len ; i++)
+    ITM_SendChar((*ptr++));
+  return len;
+}
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -46,7 +53,6 @@ osThreadId defaultTaskHandle;
 osThreadId taskMotorLigadoHandle;
 osThreadId btnLigarMtrHandle;
 /* USER CODE BEGIN PV */
-
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -57,6 +63,11 @@ void StartTask03(void const * argument);
 void ligarMotor(void const * argument);
 
 /* USER CODE BEGIN PFP */
+void trataInterrupcao(uint16_t);
+int checkDebounce(uint16_t,GPIO_TypeDef  *);
+static QueueHandle_t Queue_StartMotor = NULL;
+static QueueHandle_t Queue_StopMotor  = NULL;
+static QueueHandle_t Queue_delayLedAzul  = NULL;
 
 /* USER CODE END PFP */
 
@@ -111,6 +122,10 @@ int main(void)
 
   /* USER CODE BEGIN RTOS_QUEUES */
   /* add queues, ... */
+  Queue_StartMotor = xQueueCreate( 10, sizeof(int*));
+  Queue_StopMotor = xQueueCreate( 10, sizeof(int*));
+  Queue_delayLedAzul = xQueueCreate( 5, sizeof(int*));
+
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
@@ -252,10 +267,76 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+BaseType_t xHigherPriorityTaskWoken;
+void trataInterrupcao(uint16_t GPIO_Pin){
+  switch(GPIO_Pin){
+    case Poco_NivelBaixo_Pin:{
+      if(checkDebounce(Poco_NivelBaixo_Pin, GPIOA) == 0){
+          uint8_t paradaTipo = 2;
+          xQueueSendToFrontFromISR(Queue_StopMotor, &paradaTipo, &xHigherPriorityTaskWoken);
+      }
+    }
+    break;
+    case Caixa_NivelAlto_Pin:{
+      if(checkDebounce(Caixa_NivelAlto_Pin, GPIOA) == 1){
+        uint8_t paradaTipo = 1;
+        xQueueSendToFrontFromISR(Queue_StopMotor, &paradaTipo, &xHigherPriorityTaskWoken);
+      }
+    }
+    break;
+    case ligarMotor1min_Pin:{
+      if(checkDebounce(ligarMotor1min_Pin, GPIOA) == 1){
+        uint8_t tempoMotor = 1;
+        xQueueSendToFrontFromISR(Queue_StartMotor, &tempoMotor, &xHigherPriorityTaskWoken);
+      }
+    }
+    break;
+    case ligarMotor5min_Pin:{
+      if(checkDebounce(ligarMotor5min_Pin, GPIOA) == 1){
+        uint8_t tempoMotor = 5;
+        xQueueSendToFrontFromISR(Queue_StartMotor, &tempoMotor, &xHigherPriorityTaskWoken);
+      }
+    }
+    break;
+    case ligarMotor10min_Pin:{
+      if(checkDebounce(ligarMotor10min_Pin, GPIOA) == 1){
+        uint8_t tempoMotor = 10;
+        xQueueSendToFrontFromISR(Queue_StartMotor, &tempoMotor, &xHigherPriorityTaskWoken);
+        return;
+      }
+      return;
+    }
+    break;
+  }
+}
 
+int checkDebounce(uint16_t GPIO_Pin, GPIO_TypeDef  *GPIO_Port){
+ int inputLow = 0;
+  for(int i=0;i<1000000;i++){
+    if(HAL_GPIO_ReadPin(GPIO_Port,GPIO_Pin)==0){
+      inputLow++;
+    }
+  }
+
+  if(inputLow < 15){
+    return 1;
+  }
+  return 0;
+}
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_StartDefaultTask */
+char* msg1 = "1 Aguardando Nivel Alto Poco\r\n";
+char* msg2 = "2 Aguardando Nivel Baixo Caixa\r\n";
+char* msg3 = "3 Ligando Motor\r\n";
+char* msg4 = "4.1 Caixa_NivelAlto\r\n";
+char* msg5 = "4.2 Poco_NivelBaixo\r\n";
+char* msg6 = "5 Btn Para Ligar Motor acionado\r\n";
+char* msg7 = "6 Btn Para Ligar Motor fim Execucao\r\n";
+char* msgTempoMaximoMotor = "7 Tempo maximo de motor ligado excedido\r\n";
+char* newline = "\r\n\r\n";
+int print = 1;
+int tempoMaximoMotorLigado = 15;
 /**
   * @brief  Function implementing the defaultTask thread.
   * @param  argument: Not used
@@ -266,12 +347,107 @@ void StartDefaultTask(void const * argument)
 {
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
+  printf("Iniciando...\n");
   /* USER CODE BEGIN 5 */
+  uint8_t tipoParada;
+  int delayLedAzul = 1000;
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
-  }
+    vTaskSuspend(taskMotorLigadoHandle);
+    HAL_GPIO_WritePin(GPIOB, Motor_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(LedePCI_GPIO_Port, LedePCI_Pin, GPIO_PIN_RESET);
+    while(uxQueueMessagesWaiting( Queue_StopMotor ) != 0){
+      xQueueReceive(Queue_StopMotor, &tipoParada, 0);
+      vTaskDelay(10);
+    }
+    //1 Nivel Alto Poco
+
+    if(print == 1){
+      CDC_Transmit_FS(newline, strlen(newline));
+      CDC_Transmit_FS(msg1, strlen(msg1));
+      printf("%s", msg1);
+    }
+    int tempoParaApagarLeds = 60 * 5;//Minutos
+    int counter = 0;
+    while(HAL_GPIO_ReadPin(GPIOA,Poco_NivelAlto_Pin)==0){
+      vTaskDelay(1000);
+      HAL_GPIO_WritePin(LedePCI_GPIO_Port, LedePCI_Pin, GPIO_PIN_RESET);
+      vTaskDelay(1000);
+      HAL_GPIO_WritePin(LedePCI_GPIO_Port, LedePCI_Pin, GPIO_PIN_SET);
+      counter++;
+      if(counter >= tempoParaApagarLeds){
+        counter = 0;
+        HAL_GPIO_WritePin(GPIOB, Motor_Pin|LedAzul_Pin|LedAmarelo_Pin|LedVerde_Pin, GPIO_PIN_RESET);
+        while(uxQueueMessagesWaiting( Queue_StopMotor ) != 0){
+          xQueueReceive(Queue_StopMotor, &tipoParada, 0);
+          vTaskDelay(10);
+        }
+      }
+      print = 1;
+    }
+
+
+    HAL_GPIO_WritePin(LedePCI_GPIO_Port, LedePCI_Pin, GPIO_PIN_SET);
+    if(print == 1){
+      CDC_Transmit_FS(msg2, strlen(msg2));
+      printf("%s", msg2);
+      print = 0;
+    }
+    vTaskDelay(1000);
+    if(HAL_GPIO_ReadPin(GPIOA,Caixa_NivelBaixo_Pin)==0){
+        print = 1;
+        CDC_Transmit_FS(msg3, strlen(msg3));
+        printf("%s", msg3);
+        HAL_GPIO_WritePin(GPIOB, Motor_Pin, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_SET);
+
+        xQueueSend(Queue_delayLedAzul, &delayLedAzul, 10);
+        vTaskResume(taskMotorLigadoHandle);
+
+        HAL_GPIO_WritePin(GPIOB, LedAmarelo_Pin, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(GPIOB, LedVerde_Pin, GPIO_PIN_RESET);
+        for(;;){
+           int tempoMotorLigado = 0;
+           while(uxQueueMessagesWaiting( Queue_StopMotor ) == 0 && tempoMotorLigado < (tempoMaximoMotorLigado * 60)){
+             vTaskDelay(1000);
+             tempoMotorLigado++;
+           }
+
+           if(tempoMotorLigado >= (tempoMaximoMotorLigado * 60)){
+             CDC_Transmit_FS(msgTempoMaximoMotor, strlen(msg4));
+             printf("%s", msgTempoMaximoMotor);
+             printf("%s", msg4);
+             HAL_GPIO_WritePin(GPIOB, LedVerde_Pin, GPIO_PIN_SET);
+             HAL_GPIO_WritePin(GPIOB, LedAmarelo_Pin, GPIO_PIN_SET);
+             break;
+           }
+           else {
+              xQueueReceive(Queue_StopMotor, &tipoParada, 0);
+
+              //Caixa Cheia
+              if(tipoParada==1){
+                CDC_Transmit_FS(msg4, strlen(msg4));
+                printf("%s", msg4);
+                HAL_GPIO_WritePin(GPIOB, LedVerde_Pin, GPIO_PIN_SET);
+                break;
+              }
+
+              //Poco Vazio
+              if(tipoParada == 2){
+                CDC_Transmit_FS(msg5, strlen(msg5));
+                printf("%s", msg5);
+                HAL_GPIO_WritePin(GPIOB, LedAmarelo_Pin, GPIO_PIN_SET);
+                break;
+              }
+           }
+          //printf("4.3 Enchendo a caixa...");
+        }
+      }
+
+
+    }
   /* USER CODE END 5 */
 }
 
@@ -286,9 +462,18 @@ void StartTask03(void const * argument)
 {
   /* USER CODE BEGIN StartTask03 */
   /* Infinite loop */
+  int delayLedAzul = 1000;
   for(;;)
   {
-    osDelay(1);
+    while(uxQueueMessagesWaiting( Queue_delayLedAzul ) != 0){
+        xQueueReceive(Queue_delayLedAzul, &delayLedAzul, 0);
+        vTaskDelay(1);
+    }
+
+    HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_SET);
+    vTaskDelay(delayLedAzul);
+    HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_RESET);
+    vTaskDelay(delayLedAzul);
   }
   /* USER CODE END StartTask03 */
 }
@@ -304,9 +489,64 @@ void ligarMotor(void const * argument)
 {
   /* USER CODE BEGIN ligarMotor */
   /* Infinite loop */
+  uint8_t tempoMotorLigado;
   for(;;)
   {
-    osDelay(1);
+    while(uxQueueMessagesWaiting( Queue_StartMotor ) == 0){
+       vTaskDelay(500);
+    }
+
+    while(uxQueueMessagesWaiting( Queue_StartMotor ) != 0){
+      xQueueReceive(Queue_StartMotor, &tempoMotorLigado, 0);
+      vTaskDelay(10);
+   }
+
+    vTaskSuspend(defaultTaskHandle);
+    CDC_Transmit_FS(msg6, strlen(msg6));
+    printf("%s", msg6);
+    HAL_GPIO_WritePin(GPIOB, Motor_Pin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_SET);
+
+    int delayLedAzul = 100;
+    switch(tempoMotorLigado){
+      case 1:
+        delayLedAzul = 200;
+        break;
+      case 5:
+        delayLedAzul = 500;
+        break;
+      case 10:
+        delayLedAzul = 700;
+        break;
+    }
+    xQueueSend(Queue_delayLedAzul, &delayLedAzul, 10);
+    vTaskResume(taskMotorLigadoHandle);
+    int tempoMotorLigadoTemp = tempoMotorLigado * 60; //10 minutos
+    for(int i=0;i<tempoMotorLigadoTemp*2;i++){
+      if(uxQueueMessagesWaiting( Queue_StopMotor ) != 0){
+        uint8_t tipoParada = 0;
+        xQueueReceive(Queue_StopMotor, &tipoParada, 0);
+        //Poco Vazio
+        if(tipoParada == 2){
+          CDC_Transmit_FS(msg5, strlen(msg5));
+          printf("%s", msg5);
+          HAL_GPIO_WritePin(GPIOB, LedAmarelo_Pin, GPIO_PIN_SET);
+          break;
+        }
+      }
+      vTaskDelay(500);
+    }
+    vTaskSuspend(taskMotorLigadoHandle);
+    HAL_GPIO_WritePin(GPIOB, Motor_Pin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOB, LedAzul_Pin, GPIO_PIN_RESET);
+    CDC_Transmit_FS(msg7, strlen(msg7));
+    printf("%s", msg7);
+
+    while(uxQueueMessagesWaiting( Queue_StartMotor ) != 0){
+      xQueueReceive(Queue_StartMotor, &tempoMotorLigado, 0);
+      vTaskDelay(10);
+   }
+    vTaskResume(defaultTaskHandle);
   }
   /* USER CODE END ligarMotor */
 }
@@ -340,10 +580,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+
   /* USER CODE END Error_Handler_Debug */
 }
 
@@ -359,7 +596,7 @@ void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
   /* User can add his own implementation to report the file name and line number,
-     ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
+     tex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
