@@ -271,7 +271,7 @@ BaseType_t xHigherPriorityTaskWoken;
 void trataInterrupcao(uint16_t GPIO_Pin){
   switch(GPIO_Pin){
     case Poco_NivelBaixo_Pin:{
-      if(checkDebounce(Poco_NivelBaixo_Pin, GPIOA) == 0){
+      if(checkDebounce(Poco_NivelBaixo_Pin, GPIOA) == 1){
           uint8_t paradaTipo = 2;
           xQueueSendToFrontFromISR(Queue_StopMotor, &paradaTipo, &xHigherPriorityTaskWoken);
       }
@@ -312,7 +312,7 @@ void trataInterrupcao(uint16_t GPIO_Pin){
 
 int checkDebounce(uint16_t GPIO_Pin, GPIO_TypeDef  *GPIO_Port){
  int inputLow = 0;
-  for(int i=0;i<1000000;i++){
+  for(int i=0;i<100000;i++){
     if(HAL_GPIO_ReadPin(GPIO_Port,GPIO_Pin)==0){
       inputLow++;
     }
